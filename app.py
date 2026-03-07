@@ -4,9 +4,10 @@ import pdfplumber
 from docx import Document
 from io import BytesIO
 import datetime
+import re
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="FlussoFacile 2026 - Versione Reale", layout="wide")
+st.set_page_config(page_title="FlussoFacile 2026 - Versione Integrale", layout="wide")
 
 with st.sidebar:
     st.title("📌 Area Tecnica")
@@ -22,53 +23,71 @@ with st.sidebar:
         p_s = st.slider("% Spese (Gen-Ago)", 0, 100, 66)
         p_r = st.slider("% Residui (Gen-Ago)", 0, 100, 33)
 
-# --- MOTORE DI ESTRAZIONE DATI ---
-def estrai_dati_pdf(file_pdf):
-    dati = []
+# --- FUNZIONI DI PULIZIA DATI ---
+def pulisci_numero(testo):
+    """Trasforma '1.250,50 €' in 1250.50"""
+    if not testo: return 0.0
+    s = str(testo).replace('€', '').replace('.', '').replace(',', '.').strip()
+    try: return float(s)
+    except: return 0.0
+
+# --- MOTORE DI ESTRAZIONE E CALCOLO ---
+def analizza_e_calcola(file_pdf, tipo, perc):
+    rows = []
     with pdfplumber.open(file_pdf) as pdf:
         for page in pdf.pages:
             table = page.extract_table()
             if table:
-                for row in table:
-                    # Cerchiamo righe che hanno codici tipo A01, P02 o descrizioni contabili
-                    if row[0] and len(row) >= 4:
-                        dati.append(row)
-    return pd.DataFrame(dati)
+                for r in table:
+                    # Filtriamo le righe che hanno un codice contabile (es. A01 o 01/02)
+                    if r[0] and (len(r[0]) >= 2):
+                        descr = r[1] if len(r) > 1 else ""
+                        budget = pulisci_numero(r[2]) if len(r) > 2 else 0.0
+                        riscosso_pagato = pulisci_numero(r[3]) if len(r) > 3 else 0.0
+                        
+                        differenza = budget - riscosso_pagato
+                        prev_1 = riscosso_pagato + (differenza * (perc/100))
+                        prev_2 = differenza * (1 - (perc/100))
+                        
+                        rows.append([r[0], descr, budget, riscosso_pagato, prev_1, prev_2])
+    return pd.DataFrame(rows, columns=['Codice', 'Descrizione', 'Budget', 'Già Mosso', 'Previsione Gen-Ago', 'Previsione Set-Dic'])
 
-def genera_excel_reale(df_h, df_l, f_cassa, pe, ps, pr):
+def genera_excel_completo(df_h, df_l, f_cassa):
     output = BytesIO()
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        # In un'app reale qui faremmo la pulizia dei dati (pulizia valute, simboli €)
-        # Per ora creiamo una sintesi basata sulla struttura che abbiamo estratto
-        df_sintesi = pd.DataFrame({
-            'Fase': ['Fondo Cassa', 'Entrate', 'Uscite'],
-            'Già Mosso (€)': [f_cassa, 12500.50, 8400.20], # Qui l'app metterà i dati veri dai PDF
-            'Previsione 8+4': ['-', 'Basata su storico', 'Basata su storico']
+        # Foglio Entrate e Spese Competenza
+        df_h.to_excel(writer, sheet_name='COMPETENZA (Mod. H)', index=False)
+        # Foglio Residui
+        df_l.to_excel(writer, sheet_name='RESIDUI (Mod. L)', index=False)
+        
+        # Foglio di Riepilogo Saldi
+        tot_entr = df_h['Previsione Gen-Ago'].sum()
+        tot_uscit = df_h['Previsione Set-Dic'].sum()
+        df_riepilogo = pd.DataFrame({
+            'Voce': ['Fondo Cassa Iniziale', 'Totale Entrate Previste', 'Totale Uscite Previste', 'Saldo Finale Stimato'],
+            'Valore (€)': [f_cassa, tot_entr, tot_uscit, f_cassa + tot_entr - tot_uscit]
         })
-        df_sintesi.to_excel(writer, sheet_name='RIEPILOGO REALISTICO', index=False)
+        df_riepilogo.to_excel(writer, sheet_name='RIEPILOGO FINALE', index=False)
     return output.getvalue()
 
 # --- INTERFACCIA ---
-st.title("🚀 FlussoFacile 2026 - Analisi Dati Reali")
+st.title("🚀 FlussoFacile 2026 - Kit Completo")
 
-col1, col2 = st.columns(2)
-with col1:
-    file_h = st.file_uploader("Carica Modello H (Competenza)", type="pdf")
-with col2:
-    file_l = st.file_uploader("Carica Modello L (Residui)", type="pdf")
+file_h = st.file_uploader("Carica Modello H (Competenza)", type="pdf")
+file_l = st.file_uploader("Carica Modello L (Residui)", type="pdf")
 
 if file_h and file_l:
     if fondo_cassa <= 0:
-        st.warning("Inserisci il Fondo Cassa iniziale per calcolare i saldi reali.")
+        st.warning("⚠️ Inserisci il Fondo Cassa per attivare i calcoli reali.")
     else:
-        # L'app inizia a leggere i tuoi PDF
-        df_h_real = estrai_dati_pdf(file_h)
-        df_l_real = estrai_dati_pdf(file_l)
+        # Calcolo Reale
+        df_h_calc = analizza_e_calcola(file_h, "H", p_s)
+        df_l_calc = analizza_e_calcola(file_l, "L", p_r)
         
-        st.success(f"Analisi completata! Trovate {len(df_h_real)} voci nel Modello H e {len(df_l_real)} nel Modello L.")
+        st.success(f"Analisi completata con successo! Generati i flussi per {len(df_h_calc) + len(df_l_calc)} voci contabili.")
         
         c1, c2, c3 = st.columns(3)
         with c1:
-            excel_data = genera_excel_reale(df_h_real, df_l_real, fondo_cassa, p_e, p_s, p_r)
-            st.download_button("📊 Scarica Excel con Dati Reali", excel_data, file_name="Piano_Reale_2026.xlsx")
-        # ... (Decreto e Nota rimangono come prima)
+            excel_data = genera_excel_completo(df_h_calc, df_l_calc, fondo_cassa)
+            st.download_button("📊 Scarica Excel con DATI REALI", excel_data, file_name="Piano_Flussi_REALE.xlsx")
+        # ... (Pulsanti Word rimangono come prima)
