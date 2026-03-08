@@ -1,54 +1,44 @@
 import streamlit as st
-import pandas as pd
-import pdfplumber
-from docx import Document
-from io import BytesIO
-import datetime
 
-# --- CONFIGURAZIONE ---
-st.set_page_config(page_title="FlussoFacile 2026 - FIX", layout="wide")
+st.set_page_config(
+    page_title="Piano Annuale dei Flussi di Cassa",
+    page_icon="🏫",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-# --- FUNZIONE DI PULIZIA E RICERCA NUMERI ---
-def estrai_numeri_da_riga(riga):
-    """Cerca tutti i valori numerici in una riga e li restituisce come lista di float."""
-    numeri = []
-    for cella in riga:
-        if cella:
-            # Pulizia: togliamo simboli e punti delle migliaia
-            s = str(cella).replace('€', '').replace('.', '').replace(',', '.').replace('\n', '').strip()
-            try:
-                val = float(s)
-                if val != 0: numeri.append(val)
-            except:
-                continue
-    return numeri
+# Sidebar navigation
+st.sidebar.title("📋 Navigazione")
+st.sidebar.markdown("---")
 
-# --- MOTORE DI ANALISI DINAMICO ---
-def analizza_pdf_intelligente(file_pdf, perc):
-    rows = []
-    with pdfplumber.open(file_pdf) as pdf:
-        for page in pdf.pages:
-            table = page.extract_table()
-            if table:
-                for r in table:
-                    # Una riga è valida se ha un codice (r[0]) e dei numeri
-                    valori = estrai_numeri_da_riga(r)
-                    if r[0] and len(valori) >= 2:
-                        # LOGICA: Di solito l'ultimo numero è il riscosso/pagato, 
-                        # il penultimo (o quello più grande) è il budget totale.
-                        budget = max(valori)
-                        riscosso = valori[-1] if valori[-1] < budget else valori[0]
-                        if len(valori) == 1: riscosso = 0 # Se c'è solo un numero, non è stato ancora mosso nulla
-                        
-                        # Se è una riga di intestazione (es. "2026"), la saltiamo
-                        if r[0].isdigit() and len(r[0]) == 4 and budget > 2026: 
-                             pass # Anno del residuo, ok
-                        
-                        differenza = budget - riscosso
-                        prev_1 = riscosso + (differenza * (perc/100))
-                        prev_2 = differenza * (1 - (perc/100))
-                        
-                        rows.append([r[0], r[1][:50] if r[1] else "Voce contabile", budget, riscosso, prev_1, prev_2])
-    return pd.DataFrame(rows, columns=['Codice', 'Descrizione', 'Budget', 'Già Mosso', 'Prev. Gen-Ago', 'Prev. Set-Dic'])
+pages = {
+    "📖 Istruzioni": "pages/1_istruzioni.py",
+    "🏫 Dati Scuola": "pages/2_dati_scuola.py",
+    "📄 Caricamento PDF": "pages/3_caricamento.py",
+    "📊 Genera Documenti": "pages/4_genera.py",
+}
 
-# --- (Il resto dell'interfaccia rimane uguale, usa analizza_pdf_intelligente) ---
+# Initialize session state
+if "page" not in st.session_state:
+    st.session_state.page = "📖 Istruzioni"
+
+for label in pages:
+    if st.sidebar.button(label, use_container_width=True,
+                         type="primary" if st.session_state.page == label else "secondary"):
+        st.session_state.page = label
+        st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.caption("Piano Flussi di Cassa · Scuole · 2026")
+
+# Route to correct page
+page = st.session_state.page
+
+if page == "📖 Istruzioni":
+    exec(open("pages/1_istruzioni.py").read())
+elif page == "🏫 Dati Scuola":
+    exec(open("pages/2_dati_scuola.py").read())
+elif page == "📄 Caricamento PDF":
+    exec(open("pages/3_caricamento.py").read())
+elif page == "📊 Genera Documenti":
+    exec(open("pages/4_genera.py").read())
