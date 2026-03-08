@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 
 st.set_page_config(
     page_title="Piano Annuale dei Flussi di Cassa",
@@ -6,6 +7,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Base directory — works both locally and on Streamlit Cloud
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Sidebar navigation
 st.sidebar.title("📋 Navigazione")
@@ -31,14 +35,9 @@ for label in pages:
 st.sidebar.markdown("---")
 st.sidebar.caption("Piano Flussi di Cassa · Scuole · 2026")
 
-# Route to correct page
+# Route to correct page using absolute paths
 page = st.session_state.page
+page_file = os.path.join(BASE_DIR, pages[page])
 
-if page == "📖 Istruzioni":
-    exec(open("pages/1_istruzioni.py").read())
-elif page == "🏫 Dati Scuola":
-    exec(open("pages/2_dati_scuola.py").read())
-elif page == "📄 Caricamento PDF":
-    exec(open("pages/3_caricamento.py").read())
-elif page == "📊 Genera Documenti":
-    exec(open("pages/4_genera.py").read())
+with open(page_file, encoding="utf-8") as f:
+    exec(f.read(), {"__file__": page_file})
